@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BoundingBoxSchema, RegionSchema } from './coordinates.schema';
+import { VisualAnalysisSchema } from './visual-analysis.schema';
 
 export const ReadingDirectionSchema = z.enum(['top-to-bottom', 'right-to-left', 'left-to-right']);
 export const CharacterRoleSchema = z.enum(['protagonist', 'antagonist', 'supporting', 'extra', 'unknown']);
@@ -119,7 +120,7 @@ export const PanelSchema = z.object({
   boundary: BoundingBoxSchema,
   confidence: z.number().min(0).max(1).optional(),
   character_ids: z.array(z.string()).optional(),
-  visual_analysis: VisualAnalysisExtensionSchema,
+  visual_analysis: z.union([VisualAnalysisSchema, VisualAnalysisExtensionSchema]).optional(),
   ocr: OCRExtensionSchema,
   camera_analysis: CameraAnalysisExtensionSchema,
   manual_corrections: ManualCorrectionsExtensionSchema,

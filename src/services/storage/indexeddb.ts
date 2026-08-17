@@ -4,13 +4,25 @@ import { validateProject } from '../../data/schemas';
 import { migrateProject } from '../../data/migrations';
 
 const DB_NAME = 'manhwa_panel_analyzer_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface StoredImageBlob {
   image_id: string;
   project_id: string;
   blob: Blob;
   mime_type: string;
+  created_at: string;
+}
+
+export interface StoredProxyBlob {
+  image_id: string;
+  cache_key: string;
+  blob: Blob;
+  mime_type: string;
+  width: number;
+  height: number;
+  scale: number;
+  byte_size: number;
   created_at: string;
 }
 
@@ -34,6 +46,13 @@ interface ManhwaAnalyzerDBSchema extends DBSchema {
     value: Panel;
     indexes: {
       'by-image': string;
+    };
+  };
+  analysis_proxies: {
+    key: string;
+    value: StoredProxyBlob;
+    indexes: {
+      'by-cache-key': string;
     };
   };
 }
@@ -66,6 +85,12 @@ export async function getDatabase(): Promise<IDBPDatabase<ManhwaAnalyzerDBSchema
       if (!db.objectStoreNames.contains('panels')) {
         const panelStore = db.createObjectStore('panels', { keyPath: 'id' });
         panelStore.createIndex('by-image', 'image_id');
+      }
+
+      // Create 'analysis_proxies' derived binary blob store (Part 2.2)
+      if (!db.objectStoreNames.contains('analysis_proxies')) {
+        const proxyStore = db.createObjectStore('analysis_proxies', { keyPath: 'image_id' });
+        proxyStore.createIndex('by-cache-key', 'cache_key');
       }
     },
   });
@@ -115,13 +140,16 @@ export async function deleteProject(id: string): Promise<void> {
   const db = await getDatabase();
   
   // Clean up project
-  const tx = db.transaction(['projects', 'images'], 'readwrite');
+  const tx = db.transaction(['projects', 'images', 'analysis_proxies'], 'readwrite');
   await tx.objectStore('projects').delete(id);
 
   // Clean up any images associated with this project
   const imageIndex = tx.objectStore('images').index('by-project');
   let cursor = await imageIndex.openCursor(id);
+  const proxyStore = tx.objectStore('analysis_proxies');
   while (cursor) {
+    const imgId = cursor.value.image_id;
+    await proxyStore.delete(imgId);
     await cursor.delete();
     cursor = await cursor.continue();
   }
@@ -284,3 +312,53 @@ export async function checkStorageConsistency(project: Project): Promise<{
     };
   }
 }
+
+/**
+ * Saves a derived analysis proxy blob to IndexedDB (Part 2.2).
+ */
+export async function saveProxyBlob(record: StoredProxyBlob): Promise<void> {
+  const db = await getDatabase();
+  await db.put('analysis_proxies', record);
+}
+
+/**
+ * Retrieves a stored analysis proxy blob record by image_id (Part 2.2).
+ */
+export async function getProxyBlob(imageId: string): Promise<StoredProxyBlob | null> {
+  if (!imageId) return null;
+  const db = await getDatabase();
+  const record = await db.get('analysis_proxies', imageId);
+  return record || null;
+}
+
+/**
+ * Deletes a stored analysis proxy blob by image_id (Part 2.2).
+ */
+export async function deleteProxyBlob(imageId: string): Promise<void> {
+  if (!imageId) return;
+  const db = await getDatabase();
+  await db.delete('analysis_proxies', imageId);
+}
+
+/**
+ * Retrieves all stored proxy keys across the database.
+ */
+export async function getAllProxyBlobKeys(): Promise<string[]> {
+  try {
+    const db = await getDatabase();
+    return await db.getAllKeys('analysis_proxies');
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Clears all cached analysis proxies across IndexedDB.
+ */
+export async function clearAllProxies(): Promise<void> {
+  const db = await getDatabase();
+  const tx = db.transaction('analysis_proxies', 'readwrite');
+  await tx.store.clear();
+  await tx.done;
+}
+

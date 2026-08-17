@@ -44,6 +44,10 @@ export interface ProjectState {
   reversePanels: () => Promise<boolean>;
   resetPanelsToImport: () => Promise<boolean>;
 
+  // Panel Analysis & Preprocessing Updates (Part 2.2)
+  updatePanelPreprocessing: (panelId: string, preprocessingInfo: import('../types').PreprocessingInfo) => Promise<boolean>;
+  updatePanelVisualAnalysis: (panelId: string, visualAnalysis: Partial<import('../types').VisualAnalysis>) => Promise<boolean>;
+
   saveCurrentProject: () => Promise<boolean>;
   deleteProject: (projectId: string) => Promise<boolean>;
   refreshProjectList: () => Promise<void>;
@@ -357,6 +361,101 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const restored = serviceResetToImport(currentProject.panels, currentProject.images);
     return reorderPanels(restored);
+  },
+
+  updatePanelPreprocessing: async (panelId, preprocessingInfo) => {
+    const { currentProject } = get();
+    if (!currentProject) return false;
+
+    const now = new Date().toISOString();
+    const updatedPanels = currentProject.panels.map((p) => {
+      if (p.id !== panelId) return p;
+      const currentVA = (p.visual_analysis && 'analysis_version' in p.visual_analysis)
+        ? p.visual_analysis
+        : { analysis_version: '1.0.0' as const, status: 'NOT_ANALYZED' as const };
+
+      return {
+        ...p,
+        visual_analysis: {
+          ...currentVA,
+          preprocessing: preprocessingInfo,
+          updated_at: now,
+        },
+        updated_at: now,
+      };
+    });
+
+    const updatedProject: Project = {
+      ...currentProject,
+      panels: updatedPanels,
+      metadata: {
+        ...currentProject.metadata,
+        updated_at: now,
+      },
+    };
+
+    try {
+      await storage.saveProject(updatedProject);
+      set({
+        currentProject: updatedProject,
+        isDirty: false,
+        lastSavedAt: now,
+      });
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update panel preprocessing';
+      set({ error: message });
+      return false;
+    }
+  },
+
+  updatePanelVisualAnalysis: async (panelId, updates) => {
+    const { currentProject } = get();
+    if (!currentProject) return false;
+
+    const now = new Date().toISOString();
+    const updatedPanels = currentProject.panels.map((p) => {
+      if (p.id !== panelId && p.panel_id !== panelId) return p;
+      const currentVA = (p.visual_analysis && 'analysis_version' in p.visual_analysis)
+        ? p.visual_analysis
+        : { analysis_version: '1.0.0' as const, status: 'NOT_ANALYZED' as const };
+
+      return {
+        ...p,
+        visual_analysis: {
+          ...currentVA,
+          ...updates,
+          stages: {
+            ...currentVA.stages,
+            ...updates.stages,
+          },
+        },
+        updated_at: now,
+      };
+    });
+
+    const updatedProject: Project = {
+      ...currentProject,
+      panels: updatedPanels,
+      metadata: {
+        ...currentProject.metadata,
+        updated_at: now,
+      },
+    };
+
+    try {
+      await storage.saveProject(updatedProject);
+      set({
+        currentProject: updatedProject,
+        isDirty: false,
+        lastSavedAt: now,
+      });
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to update panel visual analysis';
+      set({ error: message });
+      return false;
+    }
   },
 
   saveCurrentProject: async () => {

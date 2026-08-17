@@ -28,6 +28,26 @@ import {
   calculateOptimalZoom,
   formatAspectRatio,
 } from '../features/review/asset-inspection.service';
+import {
+  VisualAnalysis,
+  VisualAnalysisStatus,
+  createDefaultVisualAnalysis,
+} from '../types';
+import {
+  VisualAnalysisSchema,
+  ConfidenceNumberSchema,
+  SubjectSchema,
+  CharacterDetectionSchema,
+  TextElementSchema,
+  SceneContextSchema,
+  ActionObservationSchema,
+  VisualFocusSchema,
+  CameraRegionSchema,
+  CameraAnalysisSchema,
+  AnalysisErrorSchema,
+  BoundingBoxSchema,
+} from '../data/schemas';
+import { FoundationVisualAnalysisEngine } from '../engines/visual-analysis';
 import { validateProjectForAnalysis } from '../features/validation/project-validation.service';
 
 export interface TestResult {
@@ -44,6 +64,7 @@ export interface TestResult {
     | 'Sequence Management'
     | 'Asset Inspection'
     | 'Validation Gate'
+    | 'Visual Analysis Model'
     | 'Stress & Performance';
   passed: boolean;
   message: string;
@@ -1761,6 +1782,729 @@ export async function runFoundationTestSuite(): Promise<TestResult[]> {
     });
   }
 
+  // ==========================================
+  // Part 2.1: Visual Analysis Data Model & Engine Foundation Tests
+  // ==========================================
+
+  // Test 32: Valid VisualAnalysis schema (full structure & minimal structure)
+  const t32Start = performance.now();
+  try {
+    const minimalAnalysis: VisualAnalysis = {
+      analysis_version: '1.0.0',
+      status: 'NOT_ANALYZED',
+    };
+    const minimalParse = VisualAnalysisSchema.safeParse(minimalAnalysis);
+
+    const fullAnalysis: VisualAnalysis = {
+      analysis_version: '1.0.0',
+      status: 'COMPLETED',
+      source: {
+        provider: 'gemini',
+        model: 'gemini-1.5-pro',
+        analyzed_at: new Date().toISOString(),
+        source_type: 'ai',
+      },
+      preprocessing: {
+        source_width: 1000,
+        source_height: 2000,
+        analysis_width: 500,
+        analysis_height: 1000,
+        scale: 0.5,
+        format: 'image/webp',
+        generated_at: new Date().toISOString(),
+      },
+      composition: {
+        shot_scale: 'medium',
+        framing: 'dynamic',
+        foreground_importance: 0.8,
+        confidence: 0.95,
+      },
+      subjects: [
+        {
+          subject_id: 'sub_001',
+          type: 'character',
+          label: 'Hero protagonist',
+          bounding_box: { x: 0.1, y: 0.2, width: 0.4, height: 0.6 },
+          importance: 'primary',
+          confidence: 0.92,
+        },
+      ],
+      characters: [
+        {
+          detection_id: 'char_001',
+          character_id: 'chr_hero',
+          bounding_box: { x: 0.1, y: 0.2, width: 0.4, height: 0.6 },
+          face_region: { x: 0.2, y: 0.22, width: 0.15, height: 0.15 },
+          visibility: 'full_body',
+          screen_position: 'center',
+          confidence: 0.9,
+        },
+      ],
+      text: [
+        {
+          text_id: 'txt_001',
+          type: 'dialogue',
+          content: 'Watch out!',
+          bounding_box: { x: 0.6, y: 0.1, width: 0.3, height: 0.2 },
+          reading_order: 0,
+          confidence: 0.98,
+        },
+      ],
+      scene: {
+        location: 'Dark Forest',
+        environment: 'woodland',
+        indoor_outdoor: 'outdoor',
+        time_context: 'night',
+        confidence: 0.85,
+      },
+      action: [
+        {
+          action_id: 'act_001',
+          type: 'combat',
+          description: 'Swinging glowing sword',
+          intensity: 'high',
+          confidence: 0.88,
+        },
+      ],
+      visual_focus: {
+        primary_target: {
+          type: 'character',
+          subject_id: 'sub_001',
+          description: 'Protagonist mid-attack',
+        },
+        focus_region: { x: 0.1, y: 0.2, width: 0.4, height: 0.6 },
+        importance: 0.95,
+        confidence: 0.9,
+      },
+      camera: {
+        recommended_target: { x: 0.1, y: 0.2, width: 0.4, height: 0.6 },
+        shot_type: 'medium-shot',
+        zoom_potential: 'medium',
+        pan_potential: 'vertical_down',
+        confidence: 0.88,
+      },
+      confidence: 0.91,
+    };
+    const fullParse = VisualAnalysisSchema.safeParse(fullAnalysis);
+
+    const passed = minimalParse.success && fullParse.success;
+    results.push({
+      name: 'Visual Analysis: Valid Minimal & Full Schema verification',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed
+        ? 'Both minimal and complete VisualAnalysis schemas validated successfully'
+        : `Errors: ${JSON.stringify(minimalParse.error || fullParse.error)}`,
+      durationMs: Math.round(performance.now() - t32Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Visual Analysis: Valid Minimal & Full Schema verification',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t32Start),
+    });
+  }
+
+  // Test 33: Invalid VisualAnalysis schema rejection
+  const t33Start = performance.now();
+  try {
+    const invalidStatusAnalysis = {
+      analysis_version: '1.0.0',
+      status: 'INVALID_STATUS_XYZ',
+    };
+    const parseRes = VisualAnalysisSchema.safeParse(invalidStatusAnalysis);
+    const passed = !parseRes.success;
+
+    results.push({
+      name: 'Visual Analysis: Invalid status strictly rejected',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Invalid analysis status correctly rejected by Zod' : 'Failed to reject invalid status',
+      durationMs: Math.round(performance.now() - t33Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Visual Analysis: Invalid status strictly rejected',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t33Start),
+    });
+  }
+
+  // Test 34: Valid confidence values (0.0 to 1.0)
+  const t34Start = performance.now();
+  try {
+    const valid0 = ConfidenceNumberSchema.safeParse(0.0).success;
+    const validMid = ConfidenceNumberSchema.safeParse(0.725).success;
+    const valid1 = ConfidenceNumberSchema.safeParse(1.0).success;
+    const passed = valid0 && validMid && valid1;
+
+    results.push({
+      name: 'Confidence Model: Valid 0.0 to 1.0 boundary values accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Accepted boundary confidence scores (0.0, 0.725, 1.0)' : 'Failed valid confidence values',
+      durationMs: Math.round(performance.now() - t34Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Confidence Model: Valid 0.0 to 1.0 boundary values accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t34Start),
+    });
+  }
+
+  // Test 35: Invalid confidence values (< 0.0, > 1.0)
+  const t35Start = performance.now();
+  try {
+    const rejectNegative = !ConfidenceNumberSchema.safeParse(-0.1).success;
+    const rejectAboveOne = !ConfidenceNumberSchema.safeParse(1.05).success;
+    const rejectNaN = !ConfidenceNumberSchema.safeParse('high').success;
+    const passed = rejectNegative && rejectAboveOne && rejectNaN;
+
+    results.push({
+      name: 'Confidence Model: Out-of-bounds confidence values strictly rejected',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Negative, >1.0, and string confidence values correctly rejected' : 'Failed to reject invalid confidence',
+      durationMs: Math.round(performance.now() - t35Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Confidence Model: Out-of-bounds confidence values strictly rejected',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t35Start),
+    });
+  }
+
+  // Test 36: Valid normalized coordinates
+  const t36Start = performance.now();
+  try {
+    const validBox = { x: 0.1, y: 0.15, width: 0.8, height: 0.7 };
+    const parseRes = BoundingBoxSchema.safeParse(validBox);
+    const passed = parseRes.success;
+
+    results.push({
+      name: 'Coordinates: Valid normalized bounding box accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Normalized bounding box correctly validated within 0..1' : 'Failed valid box',
+      durationMs: Math.round(performance.now() - t36Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Coordinates: Valid normalized bounding box accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t36Start),
+    });
+  }
+
+  // Test 37: Invalid normalized coordinates
+  const t37Start = performance.now();
+  try {
+    const overflowBox = { x: 0.8, y: 0.2, width: 0.5, height: 0.5 }; // x + width = 1.3 > 1.0
+    const parseRes = BoundingBoxSchema.safeParse(overflowBox);
+    const passed = !parseRes.success;
+
+    results.push({
+      name: 'Coordinates: Out-of-bounds bounding box (x+width > 1.0) rejected',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Overflow bounding box correctly rejected' : 'Failed to reject overflow box',
+      durationMs: Math.round(performance.now() - t37Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Coordinates: Out-of-bounds bounding box (x+width > 1.0) rejected',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t37Start),
+    });
+  }
+
+  // Test 38: Valid Subject schema
+  const t38Start = performance.now();
+  try {
+    const validSub = {
+      subject_id: 'sub_hero_01',
+      type: 'character',
+      label: 'Main character',
+      bounding_box: { x: 0.2, y: 0.2, width: 0.4, height: 0.5 },
+      visibility: 'fully_visible',
+      importance: 'primary',
+      confidence: 0.95,
+    };
+    const parseRes = SubjectSchema.safeParse(validSub);
+    const passed = parseRes.success;
+
+    results.push({
+      name: 'Subject Model: Valid Subject schema accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Subject schema verified with valid attributes' : 'Failed Subject schema',
+      durationMs: Math.round(performance.now() - t38Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Subject Model: Valid Subject schema accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t38Start),
+    });
+  }
+
+  // Test 39: Valid CharacterDetection schema
+  const t39Start = performance.now();
+  try {
+    const validChar = {
+      detection_id: 'det_char_01',
+      character_id: 'chr_jinwoo',
+      bounding_box: { x: 0.1, y: 0.1, width: 0.5, height: 0.8 },
+      face_region: { x: 0.2, y: 0.15, width: 0.2, height: 0.2 },
+      visibility: 'full_body',
+      pose: 'combat stance',
+      expression: 'determined',
+      screen_position: 'center',
+      confidence: 0.93,
+    };
+    const parseRes = CharacterDetectionSchema.safeParse(validChar);
+    const passed = parseRes.success;
+
+    results.push({
+      name: 'Character Model: Valid CharacterDetection schema accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Character detection schema verified with pose and face attributes' : 'Failed CharacterDetection schema',
+      durationMs: Math.round(performance.now() - t39Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Character Model: Valid CharacterDetection schema accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t39Start),
+    });
+  }
+
+  // Test 40: Valid TextElement schema
+  const t40Start = performance.now();
+  try {
+    const validText = {
+      text_id: 'txt_speech_01',
+      type: 'dialogue',
+      content: 'I will protect everyone.',
+      bounding_box: { x: 0.5, y: 0.05, width: 0.4, height: 0.2 },
+      reading_order: 0,
+      speaker_reference: 'chr_jinwoo',
+      confidence: 0.97,
+    };
+    const parseRes = TextElementSchema.safeParse(validText);
+    const passed = parseRes.success;
+
+    results.push({
+      name: 'Text & Dialogue Model: Valid TextElement schema accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Text element verified with bubble classification and reading order' : 'Failed TextElement schema',
+      durationMs: Math.round(performance.now() - t40Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Text & Dialogue Model: Valid TextElement schema accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t40Start),
+    });
+  }
+
+  // Test 41: Valid SceneContext schema
+  const t41Start = performance.now();
+  try {
+    const validScene = {
+      location: 'Dungeon Boss Room',
+      environment: 'subterranean throne chamber',
+      indoor_outdoor: 'indoor',
+      time_context: 'timeless',
+      lighting: 'eerie blue torches',
+      atmosphere: 'tense, oppressive',
+      confidence: 0.89,
+    };
+    const parseRes = SceneContextSchema.safeParse(validScene);
+    const passed = parseRes.success;
+
+    results.push({
+      name: 'Scene Model: Valid SceneContext schema accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Scene context verified with atmospheric and environmental attributes' : 'Failed SceneContext schema',
+      durationMs: Math.round(performance.now() - t41Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Scene Model: Valid SceneContext schema accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t41Start),
+    });
+  }
+
+  // Test 42: Valid ActionObservation schema
+  const t42Start = performance.now();
+  try {
+    const validAction = {
+      action_id: 'act_slash_01',
+      type: 'combat_strike',
+      description: 'Downward dagger slash with shadow trail',
+      actor_subject_id: 'sub_hero_01',
+      intensity: 'high',
+      direction: 'diagonal_down_right',
+      confidence: 0.91,
+    };
+    const parseRes = ActionObservationSchema.safeParse(validAction);
+    const passed = parseRes.success;
+
+    results.push({
+      name: 'Action Model: Valid ActionObservation schema accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Action observation verified with intensity and motion direction' : 'Failed ActionObservation schema',
+      durationMs: Math.round(performance.now() - t42Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Action Model: Valid ActionObservation schema accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t42Start),
+    });
+  }
+
+  // Test 43: Valid VisualFocus schema
+  const t43Start = performance.now();
+  try {
+    const validFocus = {
+      primary_target: {
+        type: 'character',
+        subject_id: 'sub_hero_01',
+        description: 'Protagonist face in focus',
+      },
+      secondary_targets: [
+        {
+          type: 'object',
+          description: 'Glowing legendary blade',
+        },
+      ],
+      focus_region: { x: 0.2, y: 0.1, width: 0.5, height: 0.6 },
+      importance: 0.95,
+      confidence: 0.92,
+      reason: 'Hero expression defines panel dramatic tension',
+    };
+    const parseRes = VisualFocusSchema.safeParse(validFocus);
+    const passed = parseRes.success;
+
+    results.push({
+      name: 'Visual Focus Model: Valid VisualFocus with targets accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Visual focus schema verified with primary and secondary target regions' : 'Failed VisualFocus schema',
+      durationMs: Math.round(performance.now() - t43Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Visual Focus Model: Valid VisualFocus with targets accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t43Start),
+    });
+  }
+
+  // Test 44: Valid CameraRegion & CameraAnalysis foundation
+  const t44Start = performance.now();
+  try {
+    const validCameraRegion = {
+      region_id: 'cam_reg_01',
+      region: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
+      safe_margin: 0.05,
+      target_type: 'character',
+      importance: 0.9,
+      confidence: 0.94,
+    };
+    const regionValid = CameraRegionSchema.safeParse(validCameraRegion).success;
+
+    const validCamera = {
+      recommended_target: { x: 0.15, y: 0.15, width: 0.7, height: 0.7 },
+      safe_regions: [validCameraRegion],
+      shot_type: 'medium_close_up',
+      zoom_potential: 'high',
+      pan_potential: 'vertical_down',
+      suggested_motion: 'slow_pan_down',
+      duration_seconds: 3.5,
+      confidence: 0.88,
+    };
+    const cameraValid = CameraAnalysisSchema.safeParse(validCamera).success;
+    const passed = regionValid && cameraValid;
+
+    results.push({
+      name: 'Camera Foundation: Valid CameraRegion & CameraAnalysis schemas accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Camera foundation validated with safe regions and motion potentials' : 'Failed Camera schemas',
+      durationMs: Math.round(performance.now() - t44Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Camera Foundation: Valid CameraRegion & CameraAnalysis schemas accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t44Start),
+    });
+  }
+
+  // Test 45: Valid AnalysisError schema
+  const t45Start = performance.now();
+  try {
+    const validErr = {
+      code: 'IMAGE_DECODE_FAILED',
+      stage: 'preprocessing',
+      message: 'Failed to extract pixel bitmap from source blob',
+      retryable: true,
+      occurred_at: new Date().toISOString(),
+    };
+    const parseRes = AnalysisErrorSchema.safeParse(validErr);
+    const passed = parseRes.success;
+
+    results.push({
+      name: 'Failure Model: Valid AnalysisError schema accepted',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Structured analysis error details validated without leaking secrets' : 'Failed AnalysisError schema',
+      durationMs: Math.round(performance.now() - t45Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Failure Model: Valid AnalysisError schema accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t45Start),
+    });
+  }
+
+  // Test 46: Analysis status transitions allowed by the model
+  const t46Start = performance.now();
+  try {
+    const statuses: VisualAnalysisStatus[] = [
+      'NOT_ANALYZED',
+      'QUEUED',
+      'ANALYZING',
+      'COMPLETED',
+      'FAILED',
+      'STALE',
+    ];
+    const allValid = statuses.every((s) => {
+      const va: VisualAnalysis = { analysis_version: '1.0.0', status: s };
+      return VisualAnalysisSchema.safeParse(va).success;
+    });
+
+    results.push({
+      name: 'Lifecycle Status: All 6 analysis lifecycle states accepted',
+      category: 'Visual Analysis Model',
+      passed: allValid,
+      message: allValid ? 'All 6 lifecycle statuses validated successfully' : 'Some lifecycle statuses failed validation',
+      durationMs: Math.round(performance.now() - t46Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Lifecycle Status: All 6 analysis lifecycle states accepted',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t46Start),
+    });
+  }
+
+  // Test 47: Existing Part 1 projects remain loadable with VisualAnalysis
+  const t47Start = performance.now();
+  try {
+    const proj = createDefaultProject({ title: 'Part 1 Backward Compatibility Test' });
+    const imgId = generateStableId('img');
+    proj.images.push({
+      image_id: imgId,
+      original_filename: 'legacy_page_01.png',
+      mime_type: 'image/png',
+      width: 800,
+      height: 1600,
+      file_size: 80000,
+      source_order: 0,
+      created_at: new Date().toISOString(),
+    });
+    proj.panels.push({
+      id: generateStableId('pnl'),
+      image_id: imgId,
+      panel_index: 0,
+      order: 0,
+      initial_order: 0,
+      boundary: { x: 0, y: 0, width: 1, height: 1 },
+      visual_analysis: {
+        analysis_version: '1.0.0',
+        status: 'NOT_ANALYZED',
+      },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    const validation = validateProject(proj);
+    const passed = validation.valid;
+
+    results.push({
+      name: 'Compatibility: Part 1 Project with VisualAnalysis model passes validateProject',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Project with VisualAnalysis passed full canonical Zod validation' : `Validation errors: ${validation.errorSummary}`,
+      durationMs: Math.round(performance.now() - t47Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Compatibility: Part 1 Project with VisualAnalysis model passes validateProject',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t47Start),
+    });
+  }
+
+  // Test 48: Existing Part 1 validation gate still passes
+  const t48Start = performance.now();
+  try {
+    const proj = createDefaultProject({ title: 'Validation Gate Compatibility' });
+    const imgId = generateStableId('img');
+    proj.images.push({
+      image_id: imgId,
+      original_filename: 'gate_test.png',
+      mime_type: 'image/png',
+      width: 1000,
+      height: 2000,
+      file_size: 100000,
+      source_order: 0,
+      created_at: new Date().toISOString(),
+    });
+    proj.panels.push({
+      id: generateStableId('pnl'),
+      image_id: imgId,
+      panel_index: 0,
+      order: 0,
+      initial_order: 0,
+      boundary: { x: 0, y: 0, width: 1, height: 1 },
+      visual_analysis: createDefaultVisualAnalysis('NOT_ANALYZED'),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+
+    const report = await validateProjectForAnalysis(proj, { checkBlobsInStorage: false });
+    const passed = report.readiness === 'READY' && report.errors.length === 0;
+
+    results.push({
+      name: 'Validation Gate: Project with default visual_analysis yields READY',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Validation Gate passed with READY state' : `Got readiness: ${report.readiness}`,
+      durationMs: Math.round(performance.now() - t48Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Validation Gate: Project with default visual_analysis yields READY',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t48Start),
+    });
+  }
+
+  // Test 49: Creating a panel with NOT_ANALYZED state works
+  const t49Start = performance.now();
+  try {
+    const defaultVA = createDefaultVisualAnalysis();
+    const passed =
+      defaultVA.analysis_version === '1.0.0' &&
+      defaultVA.status === 'NOT_ANALYZED' &&
+      defaultVA.subjects === undefined &&
+      defaultVA.characters === undefined;
+
+    results.push({
+      name: 'Foundation: createDefaultVisualAnalysis initializes clean NOT_ANALYZED state',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Default visual analysis correctly created without mock data' : 'Failed default initialization',
+      durationMs: Math.round(performance.now() - t49Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Foundation: createDefaultVisualAnalysis initializes clean NOT_ANALYZED state',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t49Start),
+    });
+  }
+
+  // Test 50: Verification that engine/factory never fabricates fake analysis values
+  const t50Start = performance.now();
+  try {
+    const engine = new FoundationVisualAnalysisEngine();
+    const testPanel: Panel = {
+      id: 'pnl_test_contract',
+      image_id: 'img_test_contract',
+      panel_index: 0,
+      order: 0,
+      boundary: { x: 0, y: 0, width: 1, height: 1 },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    const res = await engine.analyzePanel(testPanel);
+    const status = engine.getStatus(testPanel.id);
+    const passed =
+      res.status === 'NOT_ANALYZED' &&
+      res.subjects === undefined &&
+      res.characters === undefined &&
+      res.text === undefined &&
+      status === 'NOT_ANALYZED';
+
+    results.push({
+      name: 'Contract Integrity: Engine contract returns unanalyzed state without mock data',
+      category: 'Visual Analysis Model',
+      passed,
+      message: passed ? 'Engine strictly adheres to zero-fabrication contract' : 'Engine fabricated values',
+      durationMs: Math.round(performance.now() - t50Start),
+    });
+  } catch (err) {
+    results.push({
+      name: 'Contract Integrity: Engine contract returns unanalyzed state without mock data',
+      category: 'Visual Analysis Model',
+      passed: false,
+      message: err instanceof Error ? err.message : 'Error',
+      durationMs: Math.round(performance.now() - t50Start),
+    });
+  }
+
   return results;
 }
+
 

@@ -1,4 +1,5 @@
 import { BoundingBox, Region } from './coordinates';
+import { VisualAnalysis } from './visual-analysis';
 
 /**
  * Supported reading directions for manhwa / webtoons
@@ -44,6 +45,7 @@ export interface ProjectMetadata {
   chapter_number?: number;
   author?: string;
   description?: string;
+  reading_direction?: ReadingDirection;
   tags?: string[];
   created_at: string;
   updated_at: string;
@@ -53,11 +55,14 @@ export interface ProjectMetadata {
  * Configuration and preferences for a Project
  */
 export interface ProjectSettings {
-  target_aspect_ratio: string;
-  reading_direction: ReadingDirection;
-  export_target_fps: number;
-  auto_save_interval_ms: number;
-  preferred_resolution: {
+  target_aspect_ratio?: string;
+  reading_direction?: ReadingDirection;
+  export_target_fps?: number;
+  auto_save_interval_ms?: number;
+  auto_generate_proxies?: boolean;
+  max_proxy_dimension?: number;
+  theme?: string;
+  preferred_resolution?: {
     width: number;
     height: number;
   };
@@ -81,6 +86,8 @@ export interface SourceImage {
   height: number;
   /** File size in bytes */
   file_size: number;
+  /** Alias for file_size */
+  byte_size?: number;
   /** Source sequence index in the manhwa scroll */
   source_order: number;
   /** Timestamp when the image record was created */
@@ -144,22 +151,24 @@ export interface ManualCorrectionsExtension {
 export interface Panel {
   /** Stable unique internal identifier (e.g. pnl_01J...) */
   id: string;
+  /** Stable alias identifier (matching Section 25) */
+  panel_id?: string;
   /** Stable reference to the parent SourceImage */
   image_id: string;
   /** Zero-based panel index within the specific image */
-  panel_index: number;
+  panel_index?: number;
   /** Global sequence order across the entire project scroll */
   order: number;
   /** Preserved initial sequence order upon import (0-based) for Reset to Import Order */
   initial_order?: number;
   /** Normalized boundary box within the SourceImage (0.0 to 1.0) */
-  boundary: BoundingBox;
+  boundary?: BoundingBox;
   /** Optional confidence score from panel detector */
   confidence?: number;
   /** IDs of characters detected or present in this panel */
   character_ids?: string[];
-  /** Optional future visual analysis data */
-  visual_analysis?: VisualAnalysisExtension;
+  /** Canonical visual analysis data (Part 2.1) */
+  visual_analysis?: VisualAnalysis;
   /** Optional future OCR data */
   ocr?: OCRExtension;
   /** Optional future camera motion data */
@@ -167,9 +176,9 @@ export interface Panel {
   /** Optional future manual user corrections */
   manual_corrections?: ManualCorrectionsExtension;
   /** Timestamp when panel was identified */
-  created_at: string;
+  created_at?: string;
   /** Timestamp when panel was last modified */
-  updated_at: string;
+  updated_at?: string;
 }
 
 /**

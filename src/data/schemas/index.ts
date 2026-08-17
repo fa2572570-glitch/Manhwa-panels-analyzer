@@ -4,6 +4,7 @@ import { Project } from '../../types';
 
 export * from './coordinates.schema';
 export * from './project.schema';
+export * from './visual-analysis.schema';
 
 export interface ValidationErrorDetail {
   path: string;
